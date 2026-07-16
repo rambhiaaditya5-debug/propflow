@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "PropFlow"
+version = "1.0.0"
+id = "artifacts/propflow"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19279
+
+[services.development]
+run = "pnpm --filter @workspace/propflow run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/propflow", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/propflow/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19279"
+BASE_PATH = "/"
