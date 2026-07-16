@@ -1,3 +1,4 @@
+import ReactDOM from "react-dom/client";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
@@ -790,3 +791,5 @@ function OrderCard({
     </article>
   );
 }
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
