@@ -1,0 +1,26 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "IZSIRbpILal6Q0r8yqzR_"
+uri = "file://artifacts/propflow/src/App.tsx"
+type = "unspecified"
+title = "PropFlow App.tsx"
+
+[[outputs]]
+id = "_DcakstcfYXO4cetfJwlx"
+uri = "file://artifacts/propflow/src/propflow.css"
+type = "unspecified"
+title = "PropFlow propflow.css"
+
+[[outputs]]
+id = "pD8qtd76W5PJjrSArGxBy"
+uri = "file://artifacts/propflow/src/firebase.ts"
+type = "unspecified"
+title = "PropFlow firebase.ts"
+
+[[outputs]]
+id = "HtoYAYSdZ1bNSCYa1Hv3k"
+uri = "file://propflow-changes.zip"
+type = "unspecified"
+title = "PropFlow Changed Files"
