@@ -6,12 +6,14 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
 import {
   CalendarDays,
   CheckCircle2,
+  Download,
   IndianRupee,
   PackagePlus,
   Pencil,
@@ -22,6 +24,8 @@ import {
   X,
 } from "lucide-react";
 import { db } from "./firebase";
+import { downloadOrderDocument } from "./order-document";
+import { formatDate, formatMoney } from "./order-formatting";
 import "./propflow.css";
 
 const ORDER_STATUS = {
@@ -50,6 +54,7 @@ interface Order {
   staff: string;
   status: OrderStatus;
   paymentMethod: string;
+  challanNumber?: number;
   createdAt: unknown;
   givenAt: unknown;
   paidAt: unknown;
@@ -61,21 +66,8 @@ interface Vendor {
   mobileNumber: string;
 }
 
-function formatDate(value: string | undefined) {
-  if (!value) return "No date";
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
-}
-
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function formatMoney(value: number | undefined) {
-  return `Rs. ${Number(value || 0).toLocaleString("en-IN")}`;
 }
 
 function calculatePending(order: Order) {
@@ -98,6 +90,44 @@ function saveWithTimeout<T>(savePromise: Promise<T>): Promise<T> {
       );
     }),
   ]);
+}
+
+async function getOrAssignChallanNumber(orderId: string) {
+  const orderRef = doc(db, "orders", orderId);
+  const counterRef = doc(db, "documentCounters", "propflowChallan");
+
+  return runTransaction(db, async (transaction) => {
+    const orderSnapshot = await transaction.get(orderRef);
+    if (!orderSnapshot.exists()) {
+      throw new Error("This order no longer exists.");
+    }
+
+    const existingNumber = orderSnapshot.data().challanNumber;
+    if (
+      typeof existingNumber === "number" &&
+      Number.isInteger(existingNumber) &&
+      existingNumber > 0
+    ) {
+      return existingNumber;
+    }
+
+    const counterSnapshot = await transaction.get(counterRef);
+    const lastIssuedNumber = Number(
+      counterSnapshot.data()?.lastIssuedNumber ?? 0
+    );
+    const challanNumber =
+      (Number.isFinite(lastIssuedNumber) && lastIssuedNumber > 0
+        ? Math.floor(lastIssuedNumber)
+        : 0) + 1;
+
+    transaction.set(
+      counterRef,
+      { lastIssuedNumber: challanNumber, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
+    transaction.update(orderRef, { challanNumber });
+    return challanNumber;
+  });
 }
 
 export default function App() {
@@ -345,6 +375,20 @@ export default function App() {
     });
   }
 
+  async function handleDownloadOrder(order: Order) {
+    try {
+      const challanNumber = await getOrAssignChallanNumber(order.id);
+      await downloadOrderDocument({ ...order, challanNumber });
+    } catch (error) {
+      console.error("Could not download the order document:", error);
+      window.alert(
+        error instanceof Error
+          ? `The Word document could not be created: ${error.message}`
+          : "The Word document could not be created. Please try downloading it again."
+      );
+    }
+  }
+
   const showSingleColumn = activeTab !== "all";
 
   return (
@@ -567,6 +611,7 @@ export default function App() {
                 actionIcon={<CheckCircle2 size={18} />}
                 onAction={markGiven}
                 onUpdateAmount={updateOrderAmount}
+                onDownload={handleDownloadOrder}
                 compactPaymentDetails
               />
             )}
@@ -582,6 +627,7 @@ export default function App() {
                 isPaymentQueue
                 onPaymentMethod={setPaymentMethod}
                 onPaid={markPaid}
+                onDownload={handleDownloadOrder}
                 vendorFilter={paymentLeftVendorFilter}
                 onVendorFilterChange={setPaymentLeftVendorFilter}
                 vendorOptions={paymentLeftVendors}
@@ -596,6 +642,7 @@ export default function App() {
                 emptyText="No paid orders yet."
                 orders={filteredPaidOrders}
                 isPaidQueue
+                onDownload={handleDownloadOrder}
                 vendorFilter={paidVendorFilter}
                 onVendorFilterChange={setPaidVendorFilter}
                 vendorOptions={paidVendors}
@@ -618,6 +665,7 @@ interface QueueColumnProps {
   actionIcon?: React.ReactNode;
   onAction?: (id: string) => void;
   onUpdateAmount?: (id: string, amount: number) => void;
+  onDownload: (order: Order) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
@@ -638,6 +686,7 @@ function QueueColumn({
   actionIcon,
   onAction,
   onUpdateAmount,
+  onDownload,
   isPaymentQueue,
   isPaidQueue,
   onPaymentMethod,
@@ -687,6 +736,7 @@ function QueueColumn({
             actionIcon={actionIcon}
             onAction={onAction}
             onUpdateAmount={onUpdateAmount}
+            onDownload={onDownload}
             isPaymentQueue={isPaymentQueue}
             isPaidQueue={isPaidQueue}
             onPaymentMethod={onPaymentMethod}
@@ -705,6 +755,7 @@ interface OrderCardProps {
   actionIcon?: React.ReactNode;
   onAction?: (id: string) => void;
   onUpdateAmount?: (id: string, amount: number) => void;
+  onDownload: (order: Order) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
@@ -718,6 +769,7 @@ function OrderCard({
   actionIcon,
   onAction,
   onUpdateAmount,
+  onDownload,
   isPaymentQueue,
   isPaidQueue,
   onPaymentMethod,
@@ -862,6 +914,14 @@ function OrderCard({
           {actionLabel}
         </button>
       )}
+      <button
+        className="download-word-button"
+        type="button"
+        onClick={() => onDownload(order)}
+      >
+        <Download size={17} />
+        Download Word
+      </button>
     </article>
   );
 }
