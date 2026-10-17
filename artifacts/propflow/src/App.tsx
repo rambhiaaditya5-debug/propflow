@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -41,6 +41,7 @@ type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
 interface Order {
   id: string;
   description: string;
+  items?: string[];
   companyName: string;
   shootLocation: string;
   vendorId: string;
@@ -140,7 +141,7 @@ export default function App() {
   const [formError, setFormError] = useState("");
   const [vendorError, setVendorError] = useState("");
   const [form, setForm] = useState({
-    description: "",
+    items: [""] as string[],
     companyName: "",
     shootLocation: "",
     vendorId: "",
@@ -243,16 +244,54 @@ export default function App() {
     [paidOrders, paidVendorFilter]
   );
 
+  const itemFocusIndex = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (itemFocusIndex.current === null) return;
+    const input = document.querySelector<HTMLInputElement>(
+      `[data-item-index="${itemFocusIndex.current}"]`
+    );
+    itemFocusIndex.current = null;
+    input?.focus();
+  }, [form.items.length]);
+
+  function updateItem(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item, i) => (i === index ? value : item)),
+    }));
+  }
+
+  function addItemAfter(index: number) {
+    itemFocusIndex.current = index + 1;
+    setForm((current) => {
+      const next = [...current.items];
+      next.splice(index + 1, 0, "");
+      return { ...current, items: next };
+    });
+  }
+
+  function removeItem(index: number) {
+    setForm((current) => {
+      if (current.items.length <= 1) return { ...current, items: [""] };
+      return {
+        ...current,
+        items: current.items.filter((_, i) => i !== index),
+      };
+    });
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const description = form.description.trim();
+    const items = form.items.map((item) => item.trim()).filter(Boolean);
+    const description = items.join("\n");
     const companyName = form.companyName.trim();
     const shootLocation = form.shootLocation.trim();
     const amount = Number(form.amount);
     const selectedVendor = vendors.find((vendor) => vendor.id === form.vendorId);
 
     if (
-      !description ||
+      items.length === 0 ||
       !companyName ||
       !shootLocation ||
       !selectedVendor ||
@@ -273,6 +312,7 @@ export default function App() {
       await saveWithTimeout(
         addDoc(collection(db, "orders"), {
           description,
+          items,
           companyName,
           shootLocation,
           vendorId: selectedVendor.id,
@@ -293,7 +333,7 @@ export default function App() {
       );
 
       setForm({
-        description: "",
+        items: [""],
         companyName: "",
         shootLocation: "",
         vendorId: form.vendorId,
@@ -455,16 +495,48 @@ export default function App() {
             <h2>New Order</h2>
           </div>
 
-          <label>
-            Prop description
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Example: 4 brass lamps for studio shoot"
-              rows={4}
-              required
-            />
-          </label>
+          <div className="items-block">
+            <span className="items-title">Prop description (one item per line)</span>
+            {form.items.map((item, index) => (
+              <div className="item-row" key={index}>
+                <span className="item-number">{index + 1}</span>
+                <input
+                  type="text"
+                  data-item-index={index}
+                  value={item}
+                  onChange={(e) => updateItem(index, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addItemAfter(index);
+                    }
+                  }}
+                  placeholder={
+                    index === 0
+                      ? "Example: 4 brass lamps for studio shoot"
+                      : "Next item"
+                  }
+                />
+                {form.items.length > 1 && (
+                  <button
+                    type="button"
+                    className="item-remove-btn"
+                    title="Remove this item"
+                    onClick={() => removeItem(index)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type="button"
+              className="item-add-btn"
+              onClick={() => addItemAfter(form.items.length - 1)}
+            >
+              + Add new item
+            </button>
+          </div>
 
           <label>
             Company name
@@ -806,7 +878,16 @@ function OrderCard({
         <strong>{order.staff}</strong>
       </div>
 
-      <p>{order.description}</p>
+      <p className="order-description">
+        {order.items && order.items.length > 0
+          ? order.items.map((item, index) => (
+              <span key={index} className="order-description-line">
+                {order.items && order.items.length > 1 ? `${index + 1}. ` : ""}
+                {item}
+              </span>
+            ))
+          : order.description}
+      </p>
 
       <div className="detail-grid">
         <span>Vendor: {order.vendorName || "Not selected"}</span>

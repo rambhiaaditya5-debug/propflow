@@ -626,3 +626,70 @@ textarea:focus {
     text-align: center;
   }
 }
+
+
+/* Multiple description items */
+.items-block {
+  display: grid;
+  gap: 8px;
+}
+
+.items-title {
+  color: #38413a;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.item-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.item-number {
+  color: #6b7a70;
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-align: center;
+  width: 20px;
+}
+
+.item-remove-btn {
+  background: #f0ece2;
+  border: 0;
+  border-radius: 8px;
+  color: #8a3b2e;
+  flex: 0 0 auto;
+  font-size: 1.2rem;
+  font-weight: 800;
+  height: 42px;
+  line-height: 1;
+  width: 42px;
+}
+
+.item-remove-btn:hover {
+  background: #f3dcd6;
+}
+
+.item-add-btn {
+  background: #e7f0ea;
+  border: 1px dashed #3f6951;
+  border-radius: 8px;
+  color: #2f5440;
+  font-weight: 800;
+  padding: 10px 12px;
+}
+
+.item-add-btn:hover {
+  background: #d9e8de;
+}
+
+.order-description {
+  display: grid;
+  gap: 2px;
+}
+
+.order-description-line {
+  display: block;
+}

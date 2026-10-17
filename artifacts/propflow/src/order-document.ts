@@ -23,6 +23,7 @@ const DEFAULT_PAN_NUMBER = "ABFFB5096B";
 
 export interface OrderDocumentData {
   description?: string;
+  items?: string[];
   companyName?: string;
   shootLocation?: string;
   vendorName?: string;
@@ -141,6 +142,19 @@ function detailRow(values: string[], widths: number[]) {
 
 function safeText(value: string | undefined) {
   return value?.trim() || "-";
+}
+
+function getItemLines(order: OrderDocumentData): string[] {
+  const fromItems = (order.items ?? [])
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+  if (fromItems.length > 0) return fromItems;
+
+  const fromDescription = (order.description ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return fromDescription.length > 0 ? fromDescription : ["-"];
 }
 
 function safeDate(value: string | undefined) {
@@ -341,6 +355,7 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
     "RATE",
     "Amount (Rs.)",
   ];
+  const itemLines = getItemLines(order);
   const itemRows = [
     new TableRow({
       children: itemHeader.map((label, index) =>
@@ -352,24 +367,31 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
         })
       ),
     }),
-    new TableRow({
-      children: [
-        "1",
-        safeText(order.description),
-        "-",
-        "-",
-        "1",
-        amountText,
-        amountText,
-      ].map((value, index) =>
-        invoiceCell(value, itemWidths[index], {
-          alignment: index === 1 ? AlignmentType.LEFT : AlignmentType.CENTER,
-          size: 13,
-          margin: 80,
+    ...itemLines.map(
+      (line, index) =>
+        new TableRow({
+          children: [
+            String(index + 1),
+            line,
+            "-",
+            "-",
+            index === 0 ? "1" : "",
+            index === 0 ? amountText : "-",
+            index === 0 ? amountText : "-",
+          ].map((value, columnIndex) =>
+            invoiceCell(value, itemWidths[columnIndex], {
+              alignment:
+                columnIndex === 1 ? AlignmentType.LEFT : AlignmentType.CENTER,
+              size: 13,
+              margin: 80,
+            })
+          ),
         })
-      ),
-    }),
-    ...[2, 3, 4, 5, 6].map(
+    ),
+    ...Array.from(
+      { length: Math.max(0, 6 - itemLines.length) },
+      (_, offset) => itemLines.length + offset + 1
+    ).map(
       (number) =>
         new TableRow({
           children: [
