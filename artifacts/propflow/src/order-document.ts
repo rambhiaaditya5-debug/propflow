@@ -36,6 +36,7 @@ export interface OrderDocumentData {
   staff?: string;
   status?: string;
   paymentMethod?: string;
+  paymentDate?: string;
   challanNumber?: number;
 }
 
@@ -426,7 +427,10 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
     ["IFSC CODE: -", `Received Amount     ${receivedText}`],
     ["Bank: -", `Pending Amount     ${pendingText}`],
     ["BRANCH: -", `Status     ${statusLabel(order.status)}`],
-    [`Payment Method: ${safeText(order.paymentMethod)}`, ""],
+    [
+      `Payment Method: ${safeText(order.paymentMethod)}`,
+      `Payment Date     ${safeDate(order.paymentDate)}`,
+    ],
     [`Rupees : ${amountText}`, `Grand Total (Including Tax)     ${amountText}`],
   ];
   const summary = new Table({

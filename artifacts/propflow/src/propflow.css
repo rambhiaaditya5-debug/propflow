@@ -693,3 +693,25 @@ textarea:focus {
 .order-description-line {
   display: block;
 }
+
+
+/* Required payment date */
+.payment-date-field {
+  display: grid;
+  gap: 6px;
+}
+
+.required-star {
+  color: #b3392b;
+}
+
+.payment-date-error {
+  color: #b3392b;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.payment-date-field input[aria-invalid="true"] {
+  border-color: #b3392b;
+}

@@ -55,6 +55,7 @@ interface Order {
   staff: string;
   status: OrderStatus;
   paymentMethod: string;
+  paymentDate?: string;
   challanNumber?: number;
   createdAt: unknown;
   givenAt: unknown;
@@ -403,12 +404,20 @@ export default function App() {
     await updateDoc(doc(db, "orders", orderId), { paymentMethod });
   }
 
-  async function markPaid(orderId: string, paymentMethod: string) {
+  async function markPaid(
+    orderId: string,
+    paymentMethod: string,
+    paymentDate: string
+  ) {
+    if (!paymentDate) {
+      throw new Error("Payment date is required.");
+    }
     const selectedOrder = orders.find((order) => order.id === orderId);
     const amount = Number(selectedOrder?.amount || 0);
     await updateDoc(doc(db, "orders", orderId), {
       status: ORDER_STATUS.PAID,
       paymentMethod: paymentMethod || "Cash",
+      paymentDate,
       receivedAmount: amount,
       pendingAmount: 0,
       paidAt: serverTimestamp(),
@@ -741,7 +750,7 @@ interface QueueColumnProps {
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
-  onPaid?: (id: string, method: string) => void;
+  onPaid?: (id: string, method: string, paymentDate: string) => void;
   compactPaymentDetails?: boolean;
   vendorFilter?: string;
   onVendorFilterChange?: (v: string) => void;
@@ -831,7 +840,7 @@ interface OrderCardProps {
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
-  onPaid?: (id: string, method: string) => void;
+  onPaid?: (id: string, method: string, paymentDate: string) => void;
   compactPaymentDetails?: boolean;
 }
 
@@ -850,6 +859,10 @@ function OrderCard({
 }: OrderCardProps) {
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountDraft, setAmountDraft] = useState("");
+  const [paymentDateDraft, setPaymentDateDraft] = useState(
+    order.paymentDate || ""
+  );
+  const [paymentDateError, setPaymentDateError] = useState("");
 
   function startEdit() {
     setAmountDraft(String(order.amount || ""));
@@ -971,10 +984,40 @@ function OrderCard({
             ))}
           </div>
 
+          <label className="payment-date-field">
+            <span>
+              Payment date <span className="required-star">*</span>
+            </span>
+            <input
+              type="date"
+              value={paymentDateDraft}
+              required
+              aria-invalid={paymentDateError ? true : undefined}
+              onChange={(e) => {
+                setPaymentDateDraft(e.target.value);
+                if (e.target.value) setPaymentDateError("");
+              }}
+            />
+          </label>
+          {paymentDateError && (
+            <p className="payment-date-error" role="alert">
+              {paymentDateError}
+            </p>
+          )}
+
           <button
             className="paid-button"
             type="button"
-            onClick={() => onPaid && onPaid(order.id, order.paymentMethod)}
+            onClick={() => {
+              if (!paymentDateDraft) {
+                setPaymentDateError(
+                  "Please select the payment date before marking as paid."
+                );
+                return;
+              }
+              setPaymentDateError("");
+              if (onPaid) onPaid(order.id, order.paymentMethod, paymentDateDraft);
+            }}
           >
             <WalletCards size={18} />
             Mark Paid
@@ -984,6 +1027,7 @@ function OrderCard({
         <div className="payment-note paid-note">
           <CheckCircle2 size={16} />
           Paid by {order.paymentMethod || "Cash"}
+          {order.paymentDate ? ` on ${formatDate(order.paymentDate)}` : ""}
         </div>
       ) : (
         <button
