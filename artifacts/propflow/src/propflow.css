@@ -715,3 +715,32 @@ textarea:focus {
 .payment-date-field input[aria-invalid="true"] {
   border-color: #b3392b;
 }
+
+
+/* Add Item panel and item dropdown */
+.item-panel {
+  grid-template-columns: 1fr auto;
+}
+
+.item-panel .form-error,
+.item-panel .item-count-note {
+  grid-column: 1 / -1;
+}
+
+.item-count-note,
+.item-hint {
+  color: #6b7a70;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.item-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .item-panel {
+    grid-template-columns: 1fr;
+  }
+}

@@ -37,6 +37,7 @@ export interface OrderDocumentData {
   status?: string;
   paymentMethod?: string;
   paymentDate?: string;
+  shootDays?: string;
   challanNumber?: number;
 }
 
@@ -375,7 +376,7 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
             String(index + 1),
             line,
             "-",
-            "-",
+            safeText(order.shootDays),
             index === 0 ? "1" : "",
             index === 0 ? amountText : "-",
             index === 0 ? amountText : "-",

@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Download,
   IndianRupee,
+  Package,
   PackagePlus,
   Pencil,
   Store,
@@ -56,6 +57,7 @@ interface Order {
   status: OrderStatus;
   paymentMethod: string;
   paymentDate?: string;
+  shootDays?: string;
   challanNumber?: number;
   createdAt: unknown;
   givenAt: unknown;
@@ -68,13 +70,21 @@ interface Vendor {
   mobileNumber: string;
 }
 
+interface PropItem {
+  id: string;
+  name: string;
+}
+
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function calculatePending(order: Order) {
   if (typeof order.pendingAmount === "number") return order.pendingAmount;
-  return Math.max(Number(order.amount || 0) - Number(order.receivedAmount || 0), 0);
+  return Math.max(
+    Number(order.amount || 0) - Number(order.receivedAmount || 0),
+    0,
+  );
 }
 
 function saveWithTimeout<T>(savePromise: Promise<T>): Promise<T> {
@@ -85,10 +95,10 @@ function saveWithTimeout<T>(savePromise: Promise<T>): Promise<T> {
         () =>
           reject(
             new Error(
-              "Saving took too long. Please check Firebase rules and internet."
-            )
+              "Saving took too long. Please check Firebase rules and internet.",
+            ),
           ),
-        12000
+        12000,
       );
     }),
   ]);
@@ -115,7 +125,7 @@ async function getOrAssignChallanNumber(orderId: string) {
 
     const counterSnapshot = await transaction.get(counterRef);
     const lastIssuedNumber = Number(
-      counterSnapshot.data()?.lastIssuedNumber ?? 0
+      counterSnapshot.data()?.lastIssuedNumber ?? 0,
     );
     const challanNumber =
       (Number.isFinite(lastIssuedNumber) && lastIssuedNumber > 0
@@ -125,7 +135,7 @@ async function getOrAssignChallanNumber(orderId: string) {
     transaction.set(
       counterRef,
       { lastIssuedNumber: challanNumber, updatedAt: serverTimestamp() },
-      { merge: true }
+      { merge: true },
     );
     transaction.update(orderRef, { challanNumber });
     return challanNumber;
@@ -135,6 +145,11 @@ async function getOrAssignChallanNumber(orderId: string) {
 export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [propItems, setPropItems] = useState<PropItem[]>([]);
+  const [isItemOpen, setIsItemOpen] = useState(false);
+  const [isSavingItem, setIsSavingItem] = useState(false);
+  const [itemError, setItemError] = useState("");
+  const [newItemName, setNewItemName] = useState("");
   const [activeTab, setActiveTab] = useState<string>("all");
   const [isSaving, setIsSaving] = useState(false);
   const [isVendorOpen, setIsVendorOpen] = useState(false);
@@ -148,6 +163,7 @@ export default function App() {
     vendorId: "",
     receivingDate: todayInputValue(),
     givingDate: todayInputValue(),
+    shootDays: "",
     amount: "",
     staff: "Amit",
   });
@@ -163,14 +179,14 @@ export default function App() {
   useEffect(() => {
     const ordersQuery = query(
       collection(db, "orders"),
-      orderBy("givingDate", "asc")
+      orderBy("givingDate", "asc"),
     );
     return onSnapshot(ordersQuery, (snapshot) => {
       setOrders(
         snapshot.docs.map((orderDoc) => ({
           id: orderDoc.id,
           ...(orderDoc.data() as Omit<Order, "id">),
-        }))
+        })),
       );
     });
   }, []);
@@ -178,31 +194,46 @@ export default function App() {
   useEffect(() => {
     const vendorsQuery = query(
       collection(db, "vendors"),
-      orderBy("fullName", "asc")
+      orderBy("fullName", "asc"),
     );
     return onSnapshot(vendorsQuery, (snapshot) => {
       setVendors(
         snapshot.docs.map((vendorDoc) => ({
           id: vendorDoc.id,
           ...(vendorDoc.data() as Omit<Vendor, "id">),
-        }))
+        })),
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    const itemsQuery = query(
+      collection(db, "propItems"),
+      orderBy("name", "asc"),
+    );
+    return onSnapshot(itemsQuery, (snapshot) => {
+      setPropItems(
+        snapshot.docs.map((itemDoc) => ({
+          id: itemDoc.id,
+          ...(itemDoc.data() as Omit<PropItem, "id">),
+        })),
       );
     });
   }, []);
 
   const inQueueOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.IN_QUEUE),
-    [orders]
+    [orders],
   );
 
   const paymentLeftOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.PAYMENT_LEFT),
-    [orders]
+    [orders],
   );
 
   const paidOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.PAID),
-    [orders]
+    [orders],
   );
 
   // Unique vendors for each column (only vendors who have orders in that column)
@@ -232,9 +263,11 @@ export default function App() {
   const filteredPaymentLeftOrders = useMemo(
     () =>
       paymentLeftVendorFilter
-        ? paymentLeftOrders.filter((o) => o.vendorName === paymentLeftVendorFilter)
+        ? paymentLeftOrders.filter(
+            (o) => o.vendorName === paymentLeftVendorFilter,
+          )
         : paymentLeftOrders,
-    [paymentLeftOrders, paymentLeftVendorFilter]
+    [paymentLeftOrders, paymentLeftVendorFilter],
   );
 
   const filteredPaidOrders = useMemo(
@@ -242,15 +275,15 @@ export default function App() {
       paidVendorFilter
         ? paidOrders.filter((o) => o.vendorName === paidVendorFilter)
         : paidOrders,
-    [paidOrders, paidVendorFilter]
+    [paidOrders, paidVendorFilter],
   );
 
   const itemFocusIndex = useRef<number | null>(null);
 
   useEffect(() => {
     if (itemFocusIndex.current === null) return;
-    const input = document.querySelector<HTMLInputElement>(
-      `[data-item-index="${itemFocusIndex.current}"]`
+    const input = document.querySelector<HTMLElement>(
+      `[data-item-index="${itemFocusIndex.current}"]`,
     );
     itemFocusIndex.current = null;
     input?.focus();
@@ -289,7 +322,9 @@ export default function App() {
     const companyName = form.companyName.trim();
     const shootLocation = form.shootLocation.trim();
     const amount = Number(form.amount);
-    const selectedVendor = vendors.find((vendor) => vendor.id === form.vendorId);
+    const selectedVendor = vendors.find(
+      (vendor) => vendor.id === form.vendorId,
+    );
 
     if (
       items.length === 0 ||
@@ -302,7 +337,7 @@ export default function App() {
       !Number.isFinite(amount)
     ) {
       setFormError(
-        "Please fill all order details, select a vendor, and enter the order amount."
+        "Please fill all order details, select a vendor, and enter the order amount.",
       );
       return;
     }
@@ -321,6 +356,7 @@ export default function App() {
           vendorMobile: selectedVendor.mobileNumber,
           receivingDate: form.receivingDate,
           givingDate: form.givingDate,
+          shootDays: form.shootDays.trim(),
           amount,
           receivedAmount: 0,
           pendingAmount: amount,
@@ -330,7 +366,7 @@ export default function App() {
           createdAt: serverTimestamp(),
           givenAt: null,
           paidAt: null,
-        })
+        }),
       );
 
       setForm({
@@ -340,6 +376,7 @@ export default function App() {
         vendorId: form.vendorId,
         receivingDate: todayInputValue(),
         givingDate: todayInputValue(),
+        shootDays: "",
         amount: "",
         staff: form.staff,
       });
@@ -347,7 +384,7 @@ export default function App() {
       setFormError(
         error instanceof Error
           ? error.message
-          : "Order could not be saved. Please try again."
+          : "Order could not be saved. Please try again.",
       );
     } finally {
       setIsSaving(false);
@@ -368,17 +405,50 @@ export default function App() {
           fullName,
           mobileNumber,
           createdAt: serverTimestamp(),
-        })
+        }),
       );
       setVendorForm({ fullName: "", mobileNumber: "" });
     } catch (error: unknown) {
       setVendorError(
         error instanceof Error
           ? error.message
-          : "Vendor could not be saved. Please try again."
+          : "Vendor could not be saved. Please try again.",
       );
     } finally {
       setIsSavingVendor(false);
+    }
+  }
+
+  async function handleItemSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const name = newItemName.trim();
+    if (!name) return;
+
+    if (
+      propItems.some((item) => item.name.toLowerCase() === name.toLowerCase())
+    ) {
+      setItemError("This item is already in the list.");
+      return;
+    }
+
+    setIsSavingItem(true);
+    setItemError("");
+    try {
+      await saveWithTimeout(
+        addDoc(collection(db, "propItems"), {
+          name,
+          createdAt: serverTimestamp(),
+        }),
+      );
+      setNewItemName("");
+    } catch (error: unknown) {
+      setItemError(
+        error instanceof Error
+          ? error.message
+          : "Item could not be saved. Please try again.",
+      );
+    } finally {
+      setIsSavingItem(false);
     }
   }
 
@@ -407,7 +477,7 @@ export default function App() {
   async function markPaid(
     orderId: string,
     paymentMethod: string,
-    paymentDate: string
+    paymentDate: string,
   ) {
     if (!paymentDate) {
       throw new Error("Payment date is required.");
@@ -433,7 +503,7 @@ export default function App() {
       window.alert(
         error instanceof Error
           ? `The Word document could not be created: ${error.message}`
-          : "The Word document could not be created. Please try downloading it again."
+          : "The Word document could not be created. Please try downloading it again.",
       );
     }
   }
@@ -451,10 +521,24 @@ export default function App() {
           <button
             className="vendor-button"
             type="button"
-            onClick={() => setIsVendorOpen(!isVendorOpen)}
+            onClick={() => {
+              setIsVendorOpen(!isVendorOpen);
+              setIsItemOpen(false);
+            }}
           >
             <UserPlus size={18} />
             Add Vendor
+          </button>
+          <button
+            className="vendor-button"
+            type="button"
+            onClick={() => {
+              setIsItemOpen(!isItemOpen);
+              setIsVendorOpen(false);
+            }}
+          >
+            <Package size={18} />
+            Add Item
           </button>
           <div className="status-pill">
             <span>{inQueueOrders.length}</span> in queue
@@ -497,6 +581,35 @@ export default function App() {
         </form>
       )}
 
+      {isItemOpen && (
+        <form className="vendor-panel item-panel" onSubmit={handleItemSubmit}>
+          <div className="section-title">
+            <Package size={20} />
+            <h2>Add Item</h2>
+          </div>
+          <label>
+            Item name
+            <input
+              value={newItemName}
+              onChange={(e) => {
+                setNewItemName(e.target.value);
+                setItemError("");
+              }}
+              placeholder="Example: Brass lamp"
+              required
+            />
+          </label>
+          <button className="primary-button" disabled={isSavingItem}>
+            {isSavingItem ? "Saving..." : "Save Item"}
+          </button>
+          {itemError && <p className="form-error">{itemError}</p>}
+          <p className="item-count-note">
+            {propItems.length} item{propItems.length === 1 ? "" : "s"} saved.
+            Saved items appear in the dropdown of the New Order form.
+          </p>
+        </form>
+      )}
+
       <section className="workspace">
         <form className="order-form" onSubmit={handleSubmit}>
           <div className="section-title">
@@ -505,27 +618,25 @@ export default function App() {
           </div>
 
           <div className="items-block">
-            <span className="items-title">Prop description (one item per line)</span>
+            <span className="items-title">Prop description (select items)</span>
             {form.items.map((item, index) => (
               <div className="item-row" key={index}>
                 <span className="item-number">{index + 1}</span>
-                <input
-                  type="text"
+                <select
                   data-item-index={index}
                   value={item}
                   onChange={(e) => updateItem(index, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addItemAfter(index);
-                    }
-                  }}
-                  placeholder={
-                    index === 0
-                      ? "Example: 4 brass lamps for studio shoot"
-                      : "Next item"
-                  }
-                />
+                >
+                  <option value="">Select item</option>
+                  {propItems.map((propItem) => (
+                    <option key={propItem.id} value={propItem.name}>
+                      {propItem.name}
+                    </option>
+                  ))}
+                  {item && !propItems.some((p) => p.name === item) && (
+                    <option value={item}>{item}</option>
+                  )}
+                </select>
                 {form.items.length > 1 && (
                   <button
                     type="button"
@@ -543,15 +654,23 @@ export default function App() {
               className="item-add-btn"
               onClick={() => addItemAfter(form.items.length - 1)}
             >
-              + Add new item
+              + Add another item
             </button>
+            {propItems.length === 0 && (
+              <p className="item-hint">
+                No items saved yet. Click "Add Item" at the top to create your
+                item list first.
+              </p>
+            )}
           </div>
 
           <label>
             Company name
             <input
               value={form.companyName}
-              onChange={(e) => setForm({ ...form, companyName: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, companyName: e.target.value })
+              }
               placeholder="Example: Red Studio"
               required
             />
@@ -604,6 +723,16 @@ export default function App() {
               value={form.givingDate}
               onChange={(e) => setForm({ ...form, givingDate: e.target.value })}
               required
+            />
+          </label>
+
+          <label>
+            Shoot days
+            <input
+              type="text"
+              value={form.shootDays}
+              onChange={(e) => setForm({ ...form, shootDays: e.target.value })}
+              placeholder="Example: 2"
             />
           </label>
 
@@ -805,9 +934,7 @@ function QueueColumn({
       )}
 
       <div className="cards">
-        {orders.length === 0 && (
-          <p className="empty-state">{emptyText}</p>
-        )}
+        {orders.length === 0 && <p className="empty-state">{emptyText}</p>}
 
         {orders.map((order) => (
           <OrderCard
@@ -860,7 +987,7 @@ function OrderCard({
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountDraft, setAmountDraft] = useState("");
   const [paymentDateDraft, setPaymentDateDraft] = useState(
-    order.paymentDate || ""
+    order.paymentDate || "",
   );
   const [paymentDateError, setPaymentDateError] = useState("");
 
@@ -949,6 +1076,7 @@ function OrderCard({
         ) : (
           <span>Amount: {formatMoney(order.amount)}</span>
         )}
+        {order.shootDays ? <span>Shoot days: {order.shootDays}</span> : null}
       </div>
 
       {!compactPaymentDetails && (
@@ -977,7 +1105,9 @@ function OrderCard({
                 className={order.paymentMethod === method ? "selected" : ""}
                 key={method}
                 type="button"
-                onClick={() => onPaymentMethod && onPaymentMethod(order.id, method)}
+                onClick={() =>
+                  onPaymentMethod && onPaymentMethod(order.id, method)
+                }
               >
                 {method}
               </button>
@@ -1011,12 +1141,13 @@ function OrderCard({
             onClick={() => {
               if (!paymentDateDraft) {
                 setPaymentDateError(
-                  "Please select the payment date before marking as paid."
+                  "Please select the payment date before marking as paid.",
                 );
                 return;
               }
               setPaymentDateError("");
-              if (onPaid) onPaid(order.id, order.paymentMethod, paymentDateDraft);
+              if (onPaid)
+                onPaid(order.id, order.paymentMethod, paymentDateDraft);
             }}
           >
             <WalletCards size={18} />
