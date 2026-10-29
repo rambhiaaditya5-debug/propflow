@@ -39,8 +39,19 @@ const PAYMENT_METHODS = ["Cash", "UPI", "Bank"];
 
 type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
 
+interface LineItem {
+  name: string;
+  amount: number;
+}
+
+interface DraftLineItem {
+  name: string;
+  amount: string;
+}
+
 interface Order {
   id: string;
+  lineItems?: LineItem[];
   description: string;
   items?: string[];
   companyName: string;
@@ -75,16 +86,60 @@ interface PropItem {
   name: string;
 }
 
+function sumLineItems(items: LineItem[]) {
+  return items.reduce((total, item) => total + (Number(item.amount) || 0), 0);
+}
+
+function sumDraftItems(items: DraftLineItem[]) {
+  return items.reduce((total, item) => total + (Number(item.amount) || 0), 0);
+}
+
+// Old orders have no lineItems: show their item names, with the whole
+// amount on the first item.
+function getLineItems(order: Order): LineItem[] {
+  if (order.lineItems && order.lineItems.length > 0) {
+    return order.lineItems.map((item) => ({
+      name: item.name,
+      amount: Number(item.amount) || 0,
+    }));
+  }
+  const names =
+    order.items && order.items.length > 0
+      ? order.items
+      : (order.description || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+  return names.map((name, index) => ({
+    name,
+    amount: index === 0 ? Number(order.amount || 0) : 0,
+  }));
+}
+
+function validateDraftItems(items: DraftLineItem[]): LineItem[] | null {
+  const filled = items.filter((row) => row.name.trim() || row.amount.trim());
+  if (filled.length === 0) return null;
+  const valid = filled.every(
+    (row) =>
+      row.name.trim() !== "" &&
+      row.amount.trim() !== "" &&
+      Number.isFinite(Number(row.amount)) &&
+      Number(row.amount) >= 0
+  );
+  if (!valid) return null;
+  return filled.map((row) => ({
+    name: row.name.trim(),
+    amount: Number(row.amount),
+  }));
+}
+
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function calculatePending(order: Order) {
   if (typeof order.pendingAmount === "number") return order.pendingAmount;
-  return Math.max(
-    Number(order.amount || 0) - Number(order.receivedAmount || 0),
-    0,
-  );
+  return Math.max(Number(order.amount || 0) - Number(order.receivedAmount || 0), 0);
 }
 
 function saveWithTimeout<T>(savePromise: Promise<T>): Promise<T> {
@@ -95,10 +150,10 @@ function saveWithTimeout<T>(savePromise: Promise<T>): Promise<T> {
         () =>
           reject(
             new Error(
-              "Saving took too long. Please check Firebase rules and internet.",
-            ),
+              "Saving took too long. Please check Firebase rules and internet."
+            )
           ),
-        12000,
+        12000
       );
     }),
   ]);
@@ -125,7 +180,7 @@ async function getOrAssignChallanNumber(orderId: string) {
 
     const counterSnapshot = await transaction.get(counterRef);
     const lastIssuedNumber = Number(
-      counterSnapshot.data()?.lastIssuedNumber ?? 0,
+      counterSnapshot.data()?.lastIssuedNumber ?? 0
     );
     const challanNumber =
       (Number.isFinite(lastIssuedNumber) && lastIssuedNumber > 0
@@ -135,7 +190,7 @@ async function getOrAssignChallanNumber(orderId: string) {
     transaction.set(
       counterRef,
       { lastIssuedNumber: challanNumber, updatedAt: serverTimestamp() },
-      { merge: true },
+      { merge: true }
     );
     transaction.update(orderRef, { challanNumber });
     return challanNumber;
@@ -157,14 +212,13 @@ export default function App() {
   const [formError, setFormError] = useState("");
   const [vendorError, setVendorError] = useState("");
   const [form, setForm] = useState({
-    items: [""] as string[],
+    items: [{ name: "", amount: "" }] as DraftLineItem[],
     companyName: "",
     shootLocation: "",
     vendorId: "",
     receivingDate: todayInputValue(),
     givingDate: todayInputValue(),
     shootDays: "",
-    amount: "",
     staff: "Amit",
   });
   const [vendorForm, setVendorForm] = useState({
@@ -179,14 +233,14 @@ export default function App() {
   useEffect(() => {
     const ordersQuery = query(
       collection(db, "orders"),
-      orderBy("givingDate", "asc"),
+      orderBy("givingDate", "asc")
     );
     return onSnapshot(ordersQuery, (snapshot) => {
       setOrders(
         snapshot.docs.map((orderDoc) => ({
           id: orderDoc.id,
           ...(orderDoc.data() as Omit<Order, "id">),
-        })),
+        }))
       );
     });
   }, []);
@@ -194,46 +248,43 @@ export default function App() {
   useEffect(() => {
     const vendorsQuery = query(
       collection(db, "vendors"),
-      orderBy("fullName", "asc"),
+      orderBy("fullName", "asc")
     );
     return onSnapshot(vendorsQuery, (snapshot) => {
       setVendors(
         snapshot.docs.map((vendorDoc) => ({
           id: vendorDoc.id,
           ...(vendorDoc.data() as Omit<Vendor, "id">),
-        })),
+        }))
       );
     });
   }, []);
 
   useEffect(() => {
-    const itemsQuery = query(
-      collection(db, "propItems"),
-      orderBy("name", "asc"),
-    );
+    const itemsQuery = query(collection(db, "propItems"), orderBy("name", "asc"));
     return onSnapshot(itemsQuery, (snapshot) => {
       setPropItems(
         snapshot.docs.map((itemDoc) => ({
           id: itemDoc.id,
           ...(itemDoc.data() as Omit<PropItem, "id">),
-        })),
+        }))
       );
     });
   }, []);
 
   const inQueueOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.IN_QUEUE),
-    [orders],
+    [orders]
   );
 
   const paymentLeftOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.PAYMENT_LEFT),
-    [orders],
+    [orders]
   );
 
   const paidOrders = useMemo(
     () => orders.filter((order) => order.status === ORDER_STATUS.PAID),
-    [orders],
+    [orders]
   );
 
   // Unique vendors for each column (only vendors who have orders in that column)
@@ -263,11 +314,9 @@ export default function App() {
   const filteredPaymentLeftOrders = useMemo(
     () =>
       paymentLeftVendorFilter
-        ? paymentLeftOrders.filter(
-            (o) => o.vendorName === paymentLeftVendorFilter,
-          )
+        ? paymentLeftOrders.filter((o) => o.vendorName === paymentLeftVendorFilter)
         : paymentLeftOrders,
-    [paymentLeftOrders, paymentLeftVendorFilter],
+    [paymentLeftOrders, paymentLeftVendorFilter]
   );
 
   const filteredPaidOrders = useMemo(
@@ -275,7 +324,7 @@ export default function App() {
       paidVendorFilter
         ? paidOrders.filter((o) => o.vendorName === paidVendorFilter)
         : paidOrders,
-    [paidOrders, paidVendorFilter],
+    [paidOrders, paidVendorFilter]
   );
 
   const itemFocusIndex = useRef<number | null>(null);
@@ -283,16 +332,18 @@ export default function App() {
   useEffect(() => {
     if (itemFocusIndex.current === null) return;
     const input = document.querySelector<HTMLElement>(
-      `[data-item-index="${itemFocusIndex.current}"]`,
+      `[data-item-index="${itemFocusIndex.current}"]`
     );
     itemFocusIndex.current = null;
     input?.focus();
   }, [form.items.length]);
 
-  function updateItem(index: number, value: string) {
+  function updateItem(index: number, patch: Partial<DraftLineItem>) {
     setForm((current) => ({
       ...current,
-      items: current.items.map((item, i) => (i === index ? value : item)),
+      items: current.items.map((item, i) =>
+        i === index ? { ...item, ...patch } : item
+      ),
     }));
   }
 
@@ -300,14 +351,16 @@ export default function App() {
     itemFocusIndex.current = index + 1;
     setForm((current) => {
       const next = [...current.items];
-      next.splice(index + 1, 0, "");
+      next.splice(index + 1, 0, { name: "", amount: "" });
       return { ...current, items: next };
     });
   }
 
   function removeItem(index: number) {
     setForm((current) => {
-      if (current.items.length <= 1) return { ...current, items: [""] };
+      if (current.items.length <= 1) {
+        return { ...current, items: [{ name: "", amount: "" }] };
+      }
       return {
         ...current,
         items: current.items.filter((_, i) => i !== index),
@@ -315,29 +368,29 @@ export default function App() {
     });
   }
 
+  const formTotal = sumDraftItems(form.items);
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const items = form.items.map((item) => item.trim()).filter(Boolean);
+    const lineItems = validateDraftItems(form.items);
+    const items = (lineItems || []).map((item) => item.name);
     const description = items.join("\n");
     const companyName = form.companyName.trim();
     const shootLocation = form.shootLocation.trim();
-    const amount = Number(form.amount);
-    const selectedVendor = vendors.find(
-      (vendor) => vendor.id === form.vendorId,
-    );
+    const amount = lineItems ? sumLineItems(lineItems) : 0;
+    const selectedVendor = vendors.find((vendor) => vendor.id === form.vendorId);
 
     if (
-      items.length === 0 ||
+      !lineItems ||
       !companyName ||
       !shootLocation ||
       !selectedVendor ||
       !form.receivingDate ||
       !form.givingDate ||
-      !form.staff ||
-      !Number.isFinite(amount)
+      !form.staff
     ) {
       setFormError(
-        "Please fill all order details, select a vendor, and enter the order amount.",
+        "Please fill all order details, select a vendor, and select an item with its amount in every item row."
       );
       return;
     }
@@ -349,6 +402,7 @@ export default function App() {
         addDoc(collection(db, "orders"), {
           description,
           items,
+          lineItems,
           companyName,
           shootLocation,
           vendorId: selectedVendor.id,
@@ -366,25 +420,24 @@ export default function App() {
           createdAt: serverTimestamp(),
           givenAt: null,
           paidAt: null,
-        }),
+        })
       );
 
       setForm({
-        items: [""],
+        items: [{ name: "", amount: "" }],
         companyName: "",
         shootLocation: "",
         vendorId: form.vendorId,
         receivingDate: todayInputValue(),
         givingDate: todayInputValue(),
         shootDays: "",
-        amount: "",
         staff: form.staff,
       });
     } catch (error: unknown) {
       setFormError(
         error instanceof Error
           ? error.message
-          : "Order could not be saved. Please try again.",
+          : "Order could not be saved. Please try again."
       );
     } finally {
       setIsSaving(false);
@@ -405,14 +458,14 @@ export default function App() {
           fullName,
           mobileNumber,
           createdAt: serverTimestamp(),
-        }),
+        })
       );
       setVendorForm({ fullName: "", mobileNumber: "" });
     } catch (error: unknown) {
       setVendorError(
         error instanceof Error
           ? error.message
-          : "Vendor could not be saved. Please try again.",
+          : "Vendor could not be saved. Please try again."
       );
     } finally {
       setIsSavingVendor(false);
@@ -424,9 +477,7 @@ export default function App() {
     const name = newItemName.trim();
     if (!name) return;
 
-    if (
-      propItems.some((item) => item.name.toLowerCase() === name.toLowerCase())
-    ) {
+    if (propItems.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
       setItemError("This item is already in the list.");
       return;
     }
@@ -438,14 +489,14 @@ export default function App() {
         addDoc(collection(db, "propItems"), {
           name,
           createdAt: serverTimestamp(),
-        }),
+        })
       );
       setNewItemName("");
     } catch (error: unknown) {
       setItemError(
         error instanceof Error
           ? error.message
-          : "Item could not be saved. Please try again.",
+          : "Item could not be saved. Please try again."
       );
     } finally {
       setIsSavingItem(false);
@@ -459,14 +510,18 @@ export default function App() {
     });
   }
 
-  async function updateOrderAmount(orderId: string, newAmount: number) {
+  async function updateOrderItems(orderId: string, lineItems: LineItem[]) {
     const order = orders.find((o) => o.id === orderId);
     if (!order) return;
+    const total = sumLineItems(lineItems);
+    const names = lineItems.map((item) => item.name);
     const receivedAmount = Number(order.receivedAmount || 0);
-    const pendingAmount = Math.max(newAmount - receivedAmount, 0);
     await updateDoc(doc(db, "orders", orderId), {
-      amount: newAmount,
-      pendingAmount,
+      lineItems,
+      items: names,
+      description: names.join("\n"),
+      amount: total,
+      pendingAmount: Math.max(total - receivedAmount, 0),
     });
   }
 
@@ -477,7 +532,7 @@ export default function App() {
   async function markPaid(
     orderId: string,
     paymentMethod: string,
-    paymentDate: string,
+    paymentDate: string
   ) {
     if (!paymentDate) {
       throw new Error("Payment date is required.");
@@ -503,7 +558,7 @@ export default function App() {
       window.alert(
         error instanceof Error
           ? `The Word document could not be created: ${error.message}`
-          : "The Word document could not be created. Please try downloading it again.",
+          : "The Word document could not be created. Please try downloading it again."
       );
     }
   }
@@ -618,14 +673,16 @@ export default function App() {
           </div>
 
           <div className="items-block">
-            <span className="items-title">Prop description (select items)</span>
+            <span className="items-title">
+              Prop items and amount (select item, enter its amount)
+            </span>
             {form.items.map((item, index) => (
               <div className="item-row" key={index}>
                 <span className="item-number">{index + 1}</span>
                 <select
                   data-item-index={index}
-                  value={item}
-                  onChange={(e) => updateItem(index, e.target.value)}
+                  value={item.name}
+                  onChange={(e) => updateItem(index, { name: e.target.value })}
                 >
                   <option value="">Select item</option>
                   {propItems.map((propItem) => (
@@ -633,10 +690,19 @@ export default function App() {
                       {propItem.name}
                     </option>
                   ))}
-                  {item && !propItems.some((p) => p.name === item) && (
-                    <option value={item}>{item}</option>
+                  {item.name && !propItems.some((p) => p.name === item.name) && (
+                    <option value={item.name}>{item.name}</option>
                   )}
                 </select>
+                <input
+                  className="item-amount-input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="Amount"
+                  value={item.amount}
+                  onChange={(e) => updateItem(index, { amount: e.target.value })}
+                />
                 {form.items.length > 1 && (
                   <button
                     type="button"
@@ -668,9 +734,7 @@ export default function App() {
             Company name
             <input
               value={form.companyName}
-              onChange={(e) =>
-                setForm({ ...form, companyName: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, companyName: e.target.value })}
               placeholder="Example: Red Studio"
               required
             />
@@ -736,18 +800,11 @@ export default function App() {
             />
           </label>
 
-          <label>
-            Total order amount
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={form.amount}
-              onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              placeholder="Example: 2500"
-              required
-            />
-          </label>
+          <div className="total-box">
+            <span>Total order amount</span>
+            <strong>{formatMoney(formTotal)}</strong>
+            <small>Adds up automatically from the item amounts above.</small>
+          </div>
 
           <fieldset>
             <legend>Responsible staff</legend>
@@ -820,7 +877,8 @@ export default function App() {
                 actionLabel="Given"
                 actionIcon={<CheckCircle2 size={18} />}
                 onAction={markGiven}
-                onUpdateAmount={updateOrderAmount}
+                onUpdateItems={updateOrderItems}
+                propItems={propItems}
                 onDownload={handleDownloadOrder}
                 compactPaymentDetails
               />
@@ -874,7 +932,8 @@ interface QueueColumnProps {
   actionLabel?: string;
   actionIcon?: React.ReactNode;
   onAction?: (id: string) => void;
-  onUpdateAmount?: (id: string, amount: number) => void;
+  onUpdateItems?: (id: string, items: LineItem[]) => Promise<void> | void;
+  propItems?: PropItem[];
   onDownload: (order: Order) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
@@ -895,7 +954,8 @@ function QueueColumn({
   actionLabel,
   actionIcon,
   onAction,
-  onUpdateAmount,
+  onUpdateItems,
+  propItems,
   onDownload,
   isPaymentQueue,
   isPaidQueue,
@@ -934,7 +994,9 @@ function QueueColumn({
       )}
 
       <div className="cards">
-        {orders.length === 0 && <p className="empty-state">{emptyText}</p>}
+        {orders.length === 0 && (
+          <p className="empty-state">{emptyText}</p>
+        )}
 
         {orders.map((order) => (
           <OrderCard
@@ -943,7 +1005,8 @@ function QueueColumn({
             actionLabel={actionLabel}
             actionIcon={actionIcon}
             onAction={onAction}
-            onUpdateAmount={onUpdateAmount}
+            onUpdateItems={onUpdateItems}
+            propItems={propItems}
             onDownload={onDownload}
             isPaymentQueue={isPaymentQueue}
             isPaidQueue={isPaidQueue}
@@ -962,7 +1025,8 @@ interface OrderCardProps {
   actionLabel?: string;
   actionIcon?: React.ReactNode;
   onAction?: (id: string) => void;
-  onUpdateAmount?: (id: string, amount: number) => void;
+  onUpdateItems?: (id: string, items: LineItem[]) => Promise<void> | void;
+  propItems?: PropItem[];
   onDownload: (order: Order) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
@@ -976,7 +1040,8 @@ function OrderCard({
   actionLabel,
   actionIcon,
   onAction,
-  onUpdateAmount,
+  onUpdateItems,
+  propItems,
   onDownload,
   isPaymentQueue,
   isPaidQueue,
@@ -984,29 +1049,60 @@ function OrderCard({
   onPaid,
   compactPaymentDetails,
 }: OrderCardProps) {
-  const [editingAmount, setEditingAmount] = useState(false);
-  const [amountDraft, setAmountDraft] = useState("");
+  const [editingItems, setEditingItems] = useState(false);
+  const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
+  const [editError, setEditError] = useState("");
   const [paymentDateDraft, setPaymentDateDraft] = useState(
-    order.paymentDate || "",
+    order.paymentDate || ""
   );
   const [paymentDateError, setPaymentDateError] = useState("");
 
-  function startEdit() {
-    setAmountDraft(String(order.amount || ""));
-    setEditingAmount(true);
+  function startEditItems() {
+    const current = getLineItems(order).map((item) => ({
+      name: item.name,
+      amount: String(item.amount),
+    }));
+    setDraftItems(
+      current.length > 0
+        ? current
+        : [{ name: "", amount: order.amount ? String(order.amount) : "" }]
+    );
+    setEditError("");
+    setEditingItems(true);
   }
 
-  function cancelEdit() {
-    setEditingAmount(false);
-    setAmountDraft("");
+  function cancelEditItems() {
+    setEditingItems(false);
+    setDraftItems([]);
+    setEditError("");
   }
 
-  async function saveAmount() {
-    const parsed = Number(amountDraft);
-    if (!Number.isFinite(parsed) || parsed < 0) return;
-    if (onUpdateAmount) await onUpdateAmount(order.id, parsed);
-    setEditingAmount(false);
+  function updateDraft(index: number, patch: Partial<DraftLineItem>) {
+    setDraftItems((current) =>
+      current.map((row, i) => (i === index ? { ...row, ...patch } : row))
+    );
   }
+
+  async function saveItems() {
+    const cleaned = validateDraftItems(draftItems);
+    if (!cleaned) {
+      setEditError("Select an item and enter its amount in every row.");
+      return;
+    }
+    try {
+      if (onUpdateItems) await onUpdateItems(order.id, cleaned);
+      setEditingItems(false);
+      setDraftItems([]);
+      setEditError("");
+    } catch (error: unknown) {
+      setEditError(
+        error instanceof Error ? error.message : "Could not save. Try again."
+      );
+    }
+  }
+
+  const displayLines = getLineItems(order);
+  const hasItemAmounts = !!(order.lineItems && order.lineItems.length > 0);
 
   return (
     <article className="order-card">
@@ -1018,16 +1114,104 @@ function OrderCard({
         <strong>{order.staff}</strong>
       </div>
 
-      <p className="order-description">
-        {order.items && order.items.length > 0
-          ? order.items.map((item, index) => (
-              <span key={index} className="order-description-line">
-                {order.items && order.items.length > 1 ? `${index + 1}. ` : ""}
-                {item}
-              </span>
-            ))
-          : order.description}
-      </p>
+      {editingItems ? (
+        <div className="items-editor">
+          {draftItems.map((row, index) => (
+            <div className="item-row" key={index}>
+              <span className="item-number">{index + 1}</span>
+              <select
+                value={row.name}
+                onChange={(e) => updateDraft(index, { name: e.target.value })}
+              >
+                <option value="">Select item</option>
+                {(propItems || []).map((propItem) => (
+                  <option key={propItem.id} value={propItem.name}>
+                    {propItem.name}
+                  </option>
+                ))}
+                {row.name &&
+                  !(propItems || []).some((p) => p.name === row.name) && (
+                    <option value={row.name}>{row.name}</option>
+                  )}
+              </select>
+              <input
+                className="item-amount-input"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Amount"
+                value={row.amount}
+                onChange={(e) => updateDraft(index, { amount: e.target.value })}
+              />
+              {draftItems.length > 1 && (
+                <button
+                  type="button"
+                  className="item-remove-btn"
+                  title="Remove this item"
+                  onClick={() =>
+                    setDraftItems((current) =>
+                      current.filter((_, i) => i !== index)
+                    )
+                  }
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            type="button"
+            className="item-add-btn"
+            onClick={() =>
+              setDraftItems((current) => [...current, { name: "", amount: "" }])
+            }
+          >
+            + Add item
+          </button>
+          <div className="items-total-row">
+            <span>Total</span>
+            <strong>{formatMoney(sumDraftItems(draftItems))}</strong>
+          </div>
+          {editError && <p className="form-error">{editError}</p>}
+          <div className="items-editor-actions">
+            <button type="button" className="amount-save-btn" onClick={saveItems}>
+              Save
+            </button>
+            <button
+              type="button"
+              className="amount-cancel-btn"
+              onClick={cancelEditItems}
+              title="Cancel"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="order-description">
+            {displayLines.length > 0
+              ? displayLines.map((line, index) => (
+                  <span key={index} className="order-description-line">
+                    {displayLines.length > 1 ? `${index + 1}. ` : ""}
+                    {line.name}
+                    {hasItemAmounts ? ` - ${formatMoney(line.amount)}` : ""}
+                  </span>
+                ))
+              : order.description}
+          </p>
+          {onUpdateItems && (
+            <button
+              type="button"
+              className="items-edit-btn"
+              onClick={startEditItems}
+            >
+              <Pencil size={13} />
+              Edit items and amounts
+            </button>
+          )}
+        </>
+      )}
 
       <div className="detail-grid">
         <span>Vendor: {order.vendorName || "Not selected"}</span>
@@ -1036,46 +1220,7 @@ function OrderCard({
         <span>Location: {order.shootLocation || "-"}</span>
         <span>Receiving: {formatDate(order.receivingDate)}</span>
 
-        {/* Editable amount cell — only in In Queue */}
-        {onUpdateAmount ? (
-          <div className="amount-cell" style={{ gridColumn: "span 1" }}>
-            {editingAmount ? (
-              <div className="amount-edit-row">
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={amountDraft}
-                  onChange={(e) => setAmountDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveAmount();
-                    if (e.key === "Escape") cancelEdit();
-                  }}
-                  autoFocus
-                />
-                <button className="amount-save-btn" onClick={saveAmount}>
-                  Save
-                </button>
-                <button className="amount-cancel-btn" onClick={cancelEdit}>
-                  <X size={14} />
-                </button>
-              </div>
-            ) : (
-              <>
-                <span>Amount: {formatMoney(order.amount)}</span>
-                <button
-                  className="amount-edit-btn"
-                  onClick={startEdit}
-                  title="Edit amount"
-                >
-                  <Pencil size={13} />
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <span>Amount: {formatMoney(order.amount)}</span>
-        )}
+        <span>Total: {formatMoney(order.amount)}</span>
         {order.shootDays ? <span>Shoot days: {order.shootDays}</span> : null}
       </div>
 
@@ -1105,9 +1250,7 @@ function OrderCard({
                 className={order.paymentMethod === method ? "selected" : ""}
                 key={method}
                 type="button"
-                onClick={() =>
-                  onPaymentMethod && onPaymentMethod(order.id, method)
-                }
+                onClick={() => onPaymentMethod && onPaymentMethod(order.id, method)}
               >
                 {method}
               </button>
@@ -1141,13 +1284,12 @@ function OrderCard({
             onClick={() => {
               if (!paymentDateDraft) {
                 setPaymentDateError(
-                  "Please select the payment date before marking as paid.",
+                  "Please select the payment date before marking as paid."
                 );
                 return;
               }
               setPaymentDateError("");
-              if (onPaid)
-                onPaid(order.id, order.paymentMethod, paymentDateDraft);
+              if (onPaid) onPaid(order.id, order.paymentMethod, paymentDateDraft);
             }}
           >
             <WalletCards size={18} />

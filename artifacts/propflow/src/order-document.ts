@@ -24,6 +24,7 @@ const DEFAULT_PAN_NUMBER = "ABFFB5096B";
 export interface OrderDocumentData {
   description?: string;
   items?: string[];
+  lineItems?: { name: string; amount: number }[];
   companyName?: string;
   shootLocation?: string;
   vendorName?: string;
@@ -146,17 +147,32 @@ function safeText(value: string | undefined) {
   return value?.trim() || "-";
 }
 
-function getItemLines(order: OrderDocumentData): string[] {
+interface ItemLine {
+  name: string;
+  amount?: number;
+}
+
+function getItemLines(order: OrderDocumentData): ItemLine[] {
+  const fromLineItems = (order.lineItems ?? [])
+    .map((item) => ({
+      name: String(item?.name ?? "").trim(),
+      amount: Number(item?.amount) || 0,
+    }))
+    .filter((item) => item.name);
+  if (fromLineItems.length > 0) return fromLineItems;
+
   const fromItems = (order.items ?? [])
     .map((item) => String(item ?? "").trim())
     .filter(Boolean);
-  if (fromItems.length > 0) return fromItems;
+  if (fromItems.length > 0) return fromItems.map((name) => ({ name }));
 
   const fromDescription = (order.description ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  return fromDescription.length > 0 ? fromDescription : ["-"];
+  return fromDescription.length > 0
+    ? fromDescription.map((name) => ({ name }))
+    : [{ name: "-" }];
 }
 
 function safeDate(value: string | undefined) {
@@ -374,12 +390,20 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
         new TableRow({
           children: [
             String(index + 1),
-            line,
+            line.name,
             "-",
             safeText(order.shootDays),
-            index === 0 ? "1" : "",
-            index === 0 ? amountText : "-",
-            index === 0 ? amountText : "-",
+            line.amount !== undefined ? "1" : index === 0 ? "1" : "",
+            line.amount !== undefined
+              ? safeMoney(line.amount)
+              : index === 0
+                ? amountText
+                : "-",
+            line.amount !== undefined
+              ? safeMoney(line.amount)
+              : index === 0
+                ? amountText
+                : "-",
           ].map((value, columnIndex) =>
             invoiceCell(value, itemWidths[columnIndex], {
               alignment:
