@@ -21,6 +21,20 @@ const FONT = "Arial";
 const logoUrl = new URL("./assets/be-there-logo.jpg", import.meta.url).href;
 const DEFAULT_PAN_NUMBER = "ABFFB5096B";
 
+export type OrderDocumentType = "challan" | "proforma" | "invoice";
+
+const DOCUMENT_TITLES: Record<OrderDocumentType, string> = {
+  challan: "CHALLAN",
+  proforma: "PROFORMA",
+  invoice: "INVOICE",
+};
+
+const DOCUMENT_FILE_LABELS: Record<OrderDocumentType, string> = {
+  challan: "Challan",
+  proforma: "Proforma",
+  invoice: "Invoice",
+};
+
 export interface OrderDocumentData {
   description?: string;
   items?: string[];
@@ -208,21 +222,33 @@ async function loadLogo() {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-export function getOrderDocumentFilename(order: OrderDocumentData) {
-  return `PropFlow_${filePart(order.companyName)}_${filePart(order.vendorName)}_${filePart(order.receivingDate)}.docx`;
+export function getOrderDocumentFilename(
+  order: OrderDocumentData,
+  documentType: OrderDocumentType = "invoice"
+) {
+  return `PropFlow_${DOCUMENT_FILE_LABELS[documentType]}_${filePart(order.companyName)}_${filePart(order.vendorName)}_${filePart(order.receivingDate)}.docx`;
 }
 
-export async function createOrderDocumentBlob(order: OrderDocumentData) {
+export async function createOrderDocumentBlob(
+  order: OrderDocumentData,
+  documentType: OrderDocumentType = "invoice"
+) {
+  // A challan has no amounts at all; proforma and invoice are identical
+  // except for the title at the top.
+  const showAmounts = documentType !== "challan";
   const companyName = safeText(order.companyName);
   const vendorName = safeText(order.vendorName);
   const receivingDate = safeText(order.receivingDate);
   const amount = numericValue(order.amount);
   const receivedAmount = numericValue(order.receivedAmount) ?? 0;
   const pendingAmount = amount === null ? null : amount - receivedAmount;
-  const amountText = safeMoney(order.amount);
-  const receivedText = safeMoney(order.receivedAmount);
-  const pendingText =
-    pendingAmount === null ? "-" : formatMoney(pendingAmount);
+  const amountText = showAmounts ? safeMoney(order.amount) : "";
+  const receivedText = showAmounts ? safeMoney(order.receivedAmount) : "";
+  const pendingText = !showAmounts
+    ? ""
+    : pendingAmount === null
+      ? "-"
+      : formatMoney(pendingAmount);
   const logo = await loadLogo();
 
   const header = new Table({
@@ -255,7 +281,7 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
             margins: { top: 0, bottom: 0, left: 0, right: 0 },
             children: [
               paragraph(
-                "INVOICE",
+                DOCUMENT_TITLES[documentType],
                 {
                   alignment: AlignmentType.CENTER,
                   bold: true,
@@ -394,16 +420,20 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
             "-",
             safeText(order.shootDays),
             line.amount !== undefined ? "1" : index === 0 ? "1" : "",
-            line.amount !== undefined
-              ? safeMoney(line.amount)
-              : index === 0
-                ? amountText
-                : "-",
-            line.amount !== undefined
-              ? safeMoney(line.amount)
-              : index === 0
-                ? amountText
-                : "-",
+            !showAmounts
+              ? ""
+              : line.amount !== undefined
+                ? safeMoney(line.amount)
+                : index === 0
+                  ? amountText
+                  : "-",
+            !showAmounts
+              ? ""
+              : line.amount !== undefined
+                ? safeMoney(line.amount)
+                : index === 0
+                  ? amountText
+                  : "-",
           ].map((value, columnIndex) =>
             invoiceCell(value, itemWidths[columnIndex], {
               alignment:
@@ -426,8 +456,8 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
             "",
             "",
             "",
-            "-",
-            "-",
+            showAmounts ? "-" : "",
+            showAmounts ? "-" : "",
           ].map((value, index) =>
             invoiceCell(value, itemWidths[index], {
               alignment: index === 1 ? AlignmentType.LEFT : AlignmentType.CENTER,
@@ -447,16 +477,22 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
 
   const summaryWidths = [6150, TABLE_WIDTH - 6150];
   const summaryRows = [
-    ["If there is a transfer to any account, it is your responsibility.", `Total     ${amountText}`],
-    ["ACCO. NO. : -", `Grand Total     ${amountText}`],
-    ["IFSC CODE: -", `Received Amount     ${receivedText}`],
-    ["Bank: -", `Pending Amount     ${pendingText}`],
+    [
+      "If there is a transfer to any account, it is your responsibility.",
+      showAmounts ? `Total     ${amountText}` : "",
+    ],
+    ["ACCO. NO. : -", showAmounts ? `Grand Total     ${amountText}` : ""],
+    ["IFSC CODE: -", showAmounts ? `Received Amount     ${receivedText}` : ""],
+    ["Bank: -", showAmounts ? `Pending Amount     ${pendingText}` : ""],
     ["BRANCH: -", `Status     ${statusLabel(order.status)}`],
     [
       `Payment Method: ${safeText(order.paymentMethod)}`,
       `Payment Date     ${safeDate(order.paymentDate)}`,
     ],
-    [`Rupees : ${amountText}`, `Grand Total (Including Tax)     ${amountText}`],
+    [
+      showAmounts ? `Rupees : ${amountText}` : "Rupees :",
+      showAmounts ? `Grand Total (Including Tax)     ${amountText}` : "",
+    ],
   ];
   const summary = new Table({
     width: { size: TABLE_WIDTH, type: WidthType.DXA },
@@ -561,7 +597,7 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
           summary,
           footer,
           paragraph(
-            "Computer Generated Invoice",
+            `Computer Generated ${DOCUMENT_FILE_LABELS[documentType]}`,
             { alignment: AlignmentType.CENTER, size: 11 },
             0
           ),
@@ -581,7 +617,10 @@ export async function createOrderDocumentBlob(order: OrderDocumentData) {
   return Packer.toBlob(document);
 }
 
-export async function downloadOrderDocument(order: OrderDocumentData) {
-  const blob = await createOrderDocumentBlob(order);
-  saveAs(blob, getOrderDocumentFilename(order));
+export async function downloadOrderDocument(
+  order: OrderDocumentData,
+  documentType: OrderDocumentType = "invoice"
+) {
+  const blob = await createOrderDocumentBlob(order, documentType);
+  saveAs(blob, getOrderDocumentFilename(order, documentType));
 }

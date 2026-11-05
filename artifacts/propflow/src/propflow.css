@@ -814,3 +814,16 @@ textarea:focus {
 .items-edit-btn:hover {
   text-decoration: underline;
 }
+
+/* Challan / Proforma / Invoice buttons */
+.download-buttons {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.download-buttons .download-word-button {
+  font-size: 0.85rem;
+  gap: 6px;
+  padding: 0 6px;
+}

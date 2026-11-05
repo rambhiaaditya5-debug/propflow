@@ -25,7 +25,10 @@ import {
   X,
 } from "lucide-react";
 import { db } from "./firebase";
-import { downloadOrderDocument } from "./order-document";
+import {
+  downloadOrderDocument,
+  type OrderDocumentType,
+} from "./order-document";
 import { formatDate, formatMoney } from "./order-formatting";
 import "./propflow.css";
 
@@ -549,10 +552,13 @@ export default function App() {
     });
   }
 
-  async function handleDownloadOrder(order: Order) {
+  async function handleDownloadOrder(
+    order: Order,
+    documentType: OrderDocumentType
+  ) {
     try {
       const challanNumber = await getOrAssignChallanNumber(order.id);
-      await downloadOrderDocument({ ...order, challanNumber });
+      await downloadOrderDocument({ ...order, challanNumber }, documentType);
     } catch (error) {
       console.error("Could not download the order document:", error);
       window.alert(
@@ -934,7 +940,7 @@ interface QueueColumnProps {
   onAction?: (id: string) => void;
   onUpdateItems?: (id: string, items: LineItem[]) => Promise<void> | void;
   propItems?: PropItem[];
-  onDownload: (order: Order) => void;
+  onDownload: (order: Order, documentType: OrderDocumentType) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
@@ -1027,7 +1033,7 @@ interface OrderCardProps {
   onAction?: (id: string) => void;
   onUpdateItems?: (id: string, items: LineItem[]) => Promise<void> | void;
   propItems?: PropItem[];
-  onDownload: (order: Order) => void;
+  onDownload: (order: Order, documentType: OrderDocumentType) => void;
   isPaymentQueue?: boolean;
   isPaidQueue?: boolean;
   onPaymentMethod?: (id: string, method: string) => void;
@@ -1312,14 +1318,26 @@ function OrderCard({
           {actionLabel}
         </button>
       )}
-      <button
-        className="download-word-button"
-        type="button"
-        onClick={() => onDownload(order)}
-      >
-        <Download size={17} />
-        Download Word
-      </button>
+      <div className="download-buttons">
+        {(
+          [
+            ["challan", "Challan"],
+            ["proforma", "Proforma"],
+            ["invoice", "Invoice"],
+          ] as [OrderDocumentType, string][]
+        ).map(([documentType, label]) => (
+          <button
+            key={documentType}
+            className="download-word-button"
+            type="button"
+            title={`Download ${label} (Word)`}
+            onClick={() => onDownload(order, documentType)}
+          >
+            <Download size={16} />
+            {label}
+          </button>
+        ))}
+      </div>
     </article>
   );
 }
